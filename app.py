@@ -26,8 +26,8 @@ def webhook():
     })
 
 def buscar_empleos_indeed(puesto, ciudad):
-    if not puesto or not ciudad:
-        return []
+    if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
 
     url = f"https://mx.indeed.com/jobs?q={puesto}&l={ciudad}"
     headers = {"User-Agent": "Mozilla/5.0"}
