@@ -25,9 +25,6 @@ def webhook():
     return jsonify({
         "fulfillmentText": "✅ Webhook conectado correctamente"
     })
-    return jsonify({
-        "fulfillmentText": texto
-    })
 
 def buscar_empleos_indeed(puesto, ciudad):
     if __name__ == "__main__":
