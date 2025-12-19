@@ -20,7 +20,11 @@ def webhook():
         texto = "🔎 Vacantes encontradas:\n\n"
         for r in resultados[:5]:
             texto += f"• {r}\n"
-
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    return jsonify({
+        "fulfillmentText": "✅ Webhook conectado correctamente"
+    })
     return jsonify({
         "fulfillmentText": texto
     })
