@@ -4,42 +4,51 @@ from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
+def buscar_empleos_indeed(puesto, ciudad):
+    url = f"https://mx.indeed.com/jobs?q={puesto}&l={ciudad}"
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    empleos = []
+
+    for job in soup.select("h2.jobTitle span"):
+        empleos.append(job.text.strip())
+
+    return empleos[:5]  # máximo 5 resultados
+
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json()
+    req = request.get_json()
 
-    params = data.get("queryResult", {}).get("parameters", {})
-    tipo_empleo = params.get("tipo_empleo", "")
-    location = params.get("location", {}).get("city", "")
+    # Extraer parámetros de Dialogflow
+    parameters = req.get("queryResult", {}).get("parameters", {})
+    tipo_empleo = parameters.get("tipo_empleo")
+    ubicacion = parameters.get("location", {}).get("city")
 
-    resultados = buscar_empleos_indeed(tipo_empleo, location)
+    if not tipo_empleo or not ubicacion:
+        return jsonify({
+            "fulfillmentText": "Por favor dime el tipo de empleo y la ubicación."
+        })
+
+    resultados = buscar_empleos_indeed(tipo_empleo, ubicacion)
 
     if not resultados:
-        texto = "❌ No encontré empleos recientes con esos criterios."
+        texto = "No encontré vacantes recientes con esos criterios."
     else:
-        texto = "🔍 Vacantes encontradas:\n\n"
-        for r in resultados[:5]:
+        texto = "📌 Vacantes encontradas:\n\n"
+        for r in resultados:
             texto += f"- {r}\n"
 
     return jsonify({
         "fulfillmentText": texto
     })
 
-def buscar_empleos_indeed(puesto, ciudad):
-    if not puesto or not ciudad:
-        return []
-
-    url = f"https://mx.indeed.com/jobs?q={puesto}&l={ciudad}"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    resp = requests.get(url, headers=headers, timeout=10)
-
-    soup = BeautifulSoup(resp.text, "html.parser")
-    empleos = []
-
-    for job in soup.select("h2.jobTitle span"):
-        empleos.append(job.get_text(strip=True))
-
-    return empleos
 
 if __name__ == "__main__":
-    app.run()
+    app.run(host="0.0.0.0", port=5000)
+
