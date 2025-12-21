@@ -18,7 +18,42 @@ def buscar_empleos_indeed(puesto, ciudad):
     return empleos
 
 
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
 @app.route("/webhook", methods=["POST"])
+def webhook():
+    req = request.get_json()
+
+    params = req.get("queryResult", {}).get("parameters", {})
+
+    vacante = params.get("vacante_nombre", "no especificado")
+    estado = params.get("estado_mexico", "no especificado")
+    modalidad = params.get("tipo_modalidad", "no especificado")
+    dias = params.get("dias_laborales", "no especificado")
+
+    respuesta = (
+        f"🔍 Búsqueda recibida:\n"
+        f"• Vacante: {vacante}\n"
+        f"• Ubicación: {estado}\n"
+        f"• Modalidad: {modalidad}\n"
+        f"• Días laborales: {dias}\n\n"
+        "Estoy buscando vacantes reales para ti…"
+    )
+
+    return jsonify({
+        "fulfillmentText": respuesta
+    })
+
+@app.route("/")
+def home():
+    return "Bot MyJob activo"
+
 def webhook():
     data = request.get_json()
 
