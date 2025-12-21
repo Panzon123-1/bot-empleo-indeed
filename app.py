@@ -1,18 +1,17 @@
 from flask import Flask, request, jsonify
+import urllib.parse
 
 app = Flask(__name__)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-       req = request.get_json()
+    req = request.get_json()
     params = req.get("queryResult", {}).get("parameters", {})
 
     vacante = params.get("vacante_nombre", "")
     ciudad = params.get("estado_mexico", "")
     modalidad = params.get("tipo_modalidad", "")
     dias = params.get("dias_laborales", "")
-
-    import urllib.parse
 
     search_terms = " ".join(filter(None, [vacante, modalidad]))
 
@@ -33,9 +32,6 @@ def webhook():
 
     return jsonify({
         "fulfillmentText": response_text
-    })
-
-        "fulfillmentText": respuesta
     })
 
 if __name__ == "__main__":
