@@ -4,59 +4,37 @@ app = Flask(__name__)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    req = request.get_json()
-    text = req["queryResult"]["queryText"].lower()
+       req = request.get_json()
+    params = req.get("queryResult", {}).get("parameters", {})
 
-    # Detectar modalidad
-    modalidad = None
-    if "presencial" in text:
-        modalidad = "presencial"
-    elif "remoto" in text or "home office" in text:
-        modalidad = "remoto"
-    elif "híbrido" in text or "hibrido" in text or "mixto" in text:
-        modalidad = "híbrido"
+    vacante = params.get("vacante_nombre", "")
+    ciudad = params.get("estado_mexico", "")
+    modalidad = params.get("tipo_modalidad", "")
+    dias = params.get("dias_laborales", "")
 
-    # Detectar días
-    dias = None
-    if "lunes a viernes" in text:
-        dias = "lunes a viernes"
-    elif "lunes a sábado" in text or "lunes a sabado" in text:
-        dias = "lunes a sábado"
+    import urllib.parse
 
-    # Detectar vacante
-    vacante = None
-    vacantes = [
-        "chofer", "conductor", "repartidor",
-        "vendedor", "ventas",
-        "administrativo", "oficina",
-        "gerente", "jefe", "supervisor"
-    ]
-    for v in vacantes:
-        if v in text:
-            vacante = v
-            break
+    search_terms = " ".join(filter(None, [vacante, modalidad]))
 
-    # Detectar ubicación
-    ubicacion = None
-    ciudades = [
-        "puebla", "cholula", "tehuacán", "tehuacan",
-        "tlaxcala", "cdmx", "ciudad de mexico"
-    ]
-    for c in ciudades:
-        if c in text:
-            ubicacion = c
-            break
+    indeed_url = "https://mx.indeed.com/jobs?" + urllib.parse.urlencode({
+        "q": search_terms,
+        "l": ciudad
+    })
 
-    respuesta = (
-        "🔍 Búsqueda recibida:\n"
-        f"• Vacante: {vacante or 'no especificada'}\n"
-        f"• Ubicación: {ubicacion or 'no especificada'}\n"
-        f"• Modalidad: {modalidad or 'no especificada'}\n"
-        f"• Días laborales: {dias or 'no especificados'}\n\n"
-        "Estoy buscando vacantes reales para ti…"
+    response_text = (
+        "🔍 Búsqueda recibida\n"
+        f"• Vacante: {vacante or 'No especificado'}\n"
+        f"• Ubicación: {ciudad or 'No especificado'}\n"
+        f"• Modalidad: {modalidad or 'No especificado'}\n"
+        f"• Días laborales: {dias or 'No especificado'}\n\n"
+        "👉 Vacantes reales en Indeed:\n"
+        f"{indeed_url}"
     )
 
     return jsonify({
+        "fulfillmentText": response_text
+    })
+
         "fulfillmentText": respuesta
     })
 
