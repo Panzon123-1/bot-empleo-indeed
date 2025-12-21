@@ -1,88 +1,64 @@
 from flask import Flask, request, jsonify
-import requests
-from bs4 import BeautifulSoup
-
-app = Flask(__name__)
-
-def buscar_empleos_indeed(puesto, ciudad):
-    url = f"https://mx.indeed.com/jobs?q={puesto}&l={ciudad}"
-    headers = {"User-Agent": "Mozilla/5.0"}
-
-    resp = requests.get(url, headers=headers, timeout=10)
-    soup = BeautifulSoup(resp.text, "html.parser")
-
-    empleos = []
-    for job in soup.select("h2.jobTitle span"):
-        empleos.append(job.text.strip())
-
-    return empleos
-
-
-from flask import Flask, request, jsonify
-
-app = Flask(__name__)
-
-from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     req = request.get_json()
-    params = req.get("queryResult", {}).get("parameters", {})
+    text = req["queryResult"]["queryText"].lower()
 
-    vacante = params.get("vacante_nombre")
-    estado = params.get("estado_mexico")
-    modalidad = params.get("tipo_modalidad")
-    dias = params.get("dias_laborales")
+    # Detectar modalidad
+    modalidad = None
+    if "presencial" in text:
+        modalidad = "presencial"
+    elif "remoto" in text or "home office" in text:
+        modalidad = "remoto"
+    elif "híbrido" in text or "hibrido" in text or "mixto" in text:
+        modalidad = "híbrido"
 
-    if not modalidad:
-        return jsonify({
-            "fulfillmentText": "¿Qué modalidad prefieres? (presencial, híbrido o remoto)"
-        })
+    # Detectar días
+    dias = None
+    if "lunes a viernes" in text:
+        dias = "lunes a viernes"
+    elif "lunes a sábado" in text or "lunes a sabado" in text:
+        dias = "lunes a sábado"
 
-    if not dias:
-        return jsonify({
-            "fulfillmentText": "¿Qué días te gustaría trabajar? (lunes a viernes o lunes a sábado)"
-        })
+    # Detectar vacante
+    vacante = None
+    vacantes = [
+        "chofer", "conductor", "repartidor",
+        "vendedor", "ventas",
+        "administrativo", "oficina",
+        "gerente", "jefe", "supervisor"
+    ]
+    for v in vacantes:
+        if v in text:
+            vacante = v
+            break
+
+    # Detectar ubicación
+    ubicacion = None
+    ciudades = [
+        "puebla", "cholula", "tehuacán", "tehuacan",
+        "tlaxcala", "cdmx", "ciudad de mexico"
+    ]
+    for c in ciudades:
+        if c in text:
+            ubicacion = c
+            break
 
     respuesta = (
-        f"🔍 Perfecto, buscaré vacantes reales con estos criterios:\n"
-        f"• Vacante: {vacante}\n"
-        f"• Ubicación: {estado}\n"
-        f"• Modalidad: {modalidad}\n"
-        f"• Días laborales: {dias}\n\n"
-        "Iniciando búsqueda de empleos reales…"
+        "🔍 Búsqueda recibida:\n"
+        f"• Vacante: {vacante or 'no especificada'}\n"
+        f"• Ubicación: {ubicacion or 'no especificada'}\n"
+        f"• Modalidad: {modalidad or 'no especificada'}\n"
+        f"• Días laborales: {dias or 'no especificados'}\n\n"
+        "Estoy buscando vacantes reales para ti…"
     )
 
     return jsonify({
         "fulfillmentText": respuesta
     })
 
-@app.route("/")
-def home():
-    return "Bot MyJob activo"
-
-def webhook():
-    data = request.get_json()
-
-    params = data["queryResult"]["parameters"]
-    puesto = params.get("tipo_empleo", "")
-    ciudad = params.get("location", {}).get("city", "")
-
-    resultados = buscar_empleos_indeed(puesto, ciudad)
-
-    if not resultados:
-        texto = "No encontré vacantes recientes con esos criterios."
-    else:
-        texto = "📌 Vacantes encontradas:\n\n"
-        for r in resultados[:5]:
-            texto += f"- {r}\n"
-
-    return jsonify({
-        "fulfillmentText": texto
-    })
-
-
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(debug=True)
