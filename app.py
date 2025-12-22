@@ -5,7 +5,13 @@ app = Flask(__name__)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    req = request.get_json()
+    req = request.get_json(silent=True)
+
+    if not req:
+        return jsonify({
+            "fulfillmentText": "No se recibió información válida."
+        })
+
     params = req.get("queryResult", {}).get("parameters", {})
 
     vacante = params.get("vacante_nombre", "")
@@ -13,10 +19,8 @@ def webhook():
     modalidad = params.get("tipo_modalidad", "")
     dias = params.get("dias_laborales", "")
 
-    # Construcción inteligente de búsqueda
-    search_terms = vacante
-    if modalidad:
-        search_terms = f"{vacante} {modalidad}"
+    # Construcción de términos de búsqueda
+    search_terms = " ".join(filter(None, [vacante, modalidad]))
 
     query = urllib.parse.urlencode({
         "q": search_terms,
@@ -31,12 +35,19 @@ def webhook():
         f"📍 Ubicación: {ciudad or 'No especificado'}\n"
         f"🏢 Modalidad: {modalidad or 'No especificado'}\n"
         f"🗓️ Días: {dias or 'No especificado'}\n\n"
-        f"👉 Ver vacantes disponibles:\n{indeed_url}"
+        "👉 Ver vacantes disponibles:\n"
+        f"{indeed_url}"
     )
 
     return jsonify({
         "fulfillmentText": response_text
     })
 
+
+@app.route("/", methods=["GET"])
+def home():
+    return "Bot de empleo activo 🚀"
+
+
 if __name__ == "__main__":
-    app.run()
+    app.run(host="0.0.0.0", port=10000)
