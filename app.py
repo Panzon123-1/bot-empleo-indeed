@@ -20,12 +20,21 @@ def webhook():
     dias = params.get("dias_laborales", "")
 
     # Construcción de términos de búsqueda
-    search_terms = " ".join(filter(None, [vacante, modalidad]))
+    ciudad = ciudad.title()
 
-    query = urllib.parse.urlencode({
-        "q": search_terms,
-        "l": ciudad
-    })
+keywords = [vacante]
+
+if modalidad.lower() in ["remoto", "home office"]:
+    keywords.append(modalidad)
+
+search_terms = " ".join(keywords)
+
+query = urllib.parse.urlencode({
+    "q": search_terms,
+    "l": ciudad,
+    "fromage": "7",
+    "sort": "date"
+})
 
     indeed_url = f"https://mx.indeed.com/jobs?{query}"
 
