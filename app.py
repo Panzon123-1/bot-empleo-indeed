@@ -1,98 +1,68 @@
 from flask import Flask, request, jsonify
 import urllib.parse
-import re
 
 app = Flask(__name__)
-
-def limpiar(valor):
-    """
-    Limpia valores que pueden venir como lista, None o con texto raro
-    """
-    if isinstance(valor, list):
-        valor = valor[0]
-    if not valor:
-        return ""
-    return str(valor).replace('"', '').strip()
-
-
-def limpiar_sueldo(valor):
-    """
-    Extrae solo números del sueldo (ej. '15 mil pesos' → 15000)
-    """
-    if not valor:
-        return ""
-
-    if isinstance(valor, list):
-        valor = valor[0]
-
-    texto = str(valor).lower()
-
-    # Si dice "mil", multiplicamos
-    numeros = re.findall(r'\d+', texto)
-    if not numeros:
-        return ""
-
-    sueldo = int(numeros[0])
-
-    if "mil" in texto:
-        sueldo *= 1000
-
-    return sueldo
-
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     req = request.get_json()
     params = req.get("queryResult", {}).get("parameters", {})
 
-    # 🔹 Parámetros limpios
-    vacante = limpiar(params.get("vacante_nombre"))
-    ciudad = limpiar(params.get("estado_mexico"))
-    modalidad = limpiar(params.get("tipo_modalidad"))
-    dias = limpiar(params.get("dias_laborales"))
-    sueldo = limpiar_sueldo(params.get("sueldo_mensual"))
+    vacante = params.get("vacante_nombre", "")
+    ciudad = params.get("estado_mexico", "")
+    modalidad = params.get("tipo_modalidad", "")
+    dias = params.get("dias_laborales", "")
+    sueldo = params.get("sueldo_minimo", None)
 
-    # 🔹 Construcción de búsqueda
-    search_terms = []
+    # ---- Construcción del texto de búsqueda ----
+    search_parts = []
 
     if vacante:
-        search_terms.append(vacante)
+        search_parts.append(vacante)
 
     if modalidad:
-        search_terms.append(modalidad)
+        search_parts.append(modalidad)
 
-    query_params = {
-        "q": " ".join(search_terms),
-        "l": ciudad or "México",
+    # Manejo del sueldo
+    sueldo_info = ""
+    if sueldo:
+        try:
+            sueldo_mensual = int(sueldo)
+            sueldo_diario = round(sueldo_mensual / 30)
+            search_parts.append(str(sueldo_mensual))
+            search_parts.append(f"{sueldo_diario} diarios")
+            sueldo_info = f"${sueldo_mensual} MXN aprox."
+        except:
+            sueldo_info = "No especificado"
+    else:
+        sueldo_info = "No especificado"
+
+    search_terms = " ".join(search_parts)
+
+    # ---- Query Indeed ----
+    query = urllib.parse.urlencode({
+        "q": search_terms,
+        "l": ciudad if ciudad else "México",
         "fromage": 7,
         "sort": "date"
-    }
+    })
 
-    if sueldo:
-        query_params["salary"] = sueldo
-
-    query = urllib.parse.urlencode(query_params)
     indeed_url = f"https://mx.indeed.com/jobs?{query}"
 
-    # 🔹 Respuesta al usuario
+    # ---- Respuesta del bot ----
     response_text = (
         "🔍 **Resultados reales encontrados en Indeed**\n\n"
         f"📌 Vacante: {vacante or 'Cualquiera'}\n"
         f"📍 Ubicación: {ciudad or 'México'}\n"
         f"🏢 Modalidad: {modalidad or 'Cualquiera'}\n"
         f"🗓️ Días: {dias or 'Cualquiera'}\n"
-        f"💰 Sueldo deseado: ${sueldo:,} MXN\n\n" if sueldo else
-        "🔍 **Resultados reales encontrados en Indeed**\n\n"
-        f"📌 Vacante: {vacante or 'Cualquiera'}\n"
-        f"📍 Ubicación: {ciudad or 'México'}\n"
-        f"🏢 Modalidad: {modalidad or 'Cualquiera'}\n"
-        f"🗓️ Días: {dias or 'Cualquiera'}\n\n"
-    ) + f"👉 Ver vacantes recientes:\n{indeed_url}"
+        f"💰 Sueldo deseado: {sueldo_info}\n\n"
+        f"👉 Ver vacantes recientes:\n{indeed_url}"
+    )
 
     return jsonify({
         "fulfillmentText": response_text
     })
-
 
 if __name__ == "__main__":
     app.run()
