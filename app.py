@@ -57,13 +57,16 @@ def webhook():
         texto_resultados = "Ocurrió un error al buscar vacantes. Intenta más tarde."
 
     respuesta = (
-        "🔍 **Resultados reales encontrados en Indeed**\n\n"
-        f"📌 Vacante: {vacante}\n"
-        f"📍 Ubicación: {ciudad}\n"
-        f"🏢 Modalidad: {modalidad}\n"
-        f"🗓️ Días: {dias}\n\n"
-        f"{texto_resultados}"
-    )
+        "🔍 Búsqueda de empleo lista\n\n"
+    f"📌 Vacante: {vacante or 'No especificado'}\n"
+    f"📍 Ubicación: {ciudad or 'No especificado'}\n"
+    f"🏢 Modalidad: {modalidad or 'No especificado'}\n"
+    f"🗓️ Días laborales: {dias or 'No especificado'}\n\n"
+    "👉 Te muestro vacantes reales y actualizadas publicadas en Indeed.\n"
+    "Los resultados pueden variar según disponibilidad del día.\n\n"
+    "🔗 Ver vacantes disponibles:\n"
+    f"{indeed_url}"
+)
 
     return jsonify({
         "fulfillmentText": respuesta
