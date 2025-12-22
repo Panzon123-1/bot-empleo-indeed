@@ -5,39 +5,40 @@ app = Flask(__name__)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    req = request.get_json(silent=True)
-
-    if not req:
-        return jsonify({
-            "fulfillmentText": "No se recibió información válida."
-        })
+    req = request.get_json(force=True)
 
     params = req.get("queryResult", {}).get("parameters", {})
 
-    vacante = params.get("vacante_nombre", "")
-    ciudad = params.get("estado_mexico", "")
-    modalidad = params.get("tipo_modalidad", "")
-    dias = params.get("dias_laborales", "")
+    vacante = params.get("vacante_nombre", "").strip()
+    ciudad = params.get("estado_mexico", "").strip()
+    modalidad = params.get("tipo_modalidad", "").strip()
+    dias = params.get("dias_laborales", "").strip()
 
-    # Construcción de términos de búsqueda
-    ciudad = ciudad.title()
+    # Normalizar ciudad
+    ciudad = ciudad.title() if ciudad else ""
 
-keywords = [vacante]
+    # Construcción inteligente de búsqueda para Indeed
+    keywords = []
+    if vacante:
+        keywords.append(vacante)
 
-if modalidad.lower() in ["remoto", "home office"]:
-    keywords.append(modalidad)
+    # Solo incluir modalidad si aporta valor a Indeed
+    if modalidad.lower() in ["remoto", "home office"]:
+        keywords.append(modalidad)
 
-search_terms = " ".join(keywords)
+    search_terms = " ".join(keywords)
 
-query = urllib.parse.urlencode({
-    "q": search_terms,
-    "l": ciudad,
-    "fromage": "7",
-    "sort": "date"
-})
+    # Query optimizada para Indeed
+    query = urllib.parse.urlencode({
+        "q": search_terms,
+        "l": ciudad,
+        "fromage": "7",   # Vacantes últimos 7 días
+        "sort": "date"    # Más recientes primero
+    })
 
     indeed_url = f"https://mx.indeed.com/jobs?{query}"
 
+    # Respuesta del bot
     response_text = (
         "🔍 **Resultados reales encontrados en Indeed**\n\n"
         f"📌 Vacante: {vacante or 'No especificado'}\n"
@@ -52,11 +53,5 @@ query = urllib.parse.urlencode({
         "fulfillmentText": response_text
     })
 
-
-@app.route("/", methods=["GET"])
-def home():
-    return "Bot de empleo activo 🚀"
-
-
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run()
