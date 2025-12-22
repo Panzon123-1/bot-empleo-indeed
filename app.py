@@ -16,12 +16,17 @@ def webhook():
     dias = params.get("dias_laborales", "")
 
     # Construir búsqueda
-    search_terms = " ".join(filter(None, [vacante, modalidad]))
+ # Construcción inteligente de búsqueda
+search_terms = vacante
+
+# Solo agregar modalidad si existe
+if modalidad:
+    search_terms = f"{vacante} {modalidad}"
+    
     query = urllib.parse.urlencode({
         "q": search_terms,
         "l": ciudad
     })
-
     indeed_url = f"https://mx.indeed.com/jobs?{query}"
 
     headers = {
