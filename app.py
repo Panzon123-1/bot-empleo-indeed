@@ -4,7 +4,7 @@ import urllib.parse
 app = Flask(__name__)
 
 # ===============================
-# UTILIDADES
+# CATÁLOGOS
 # ===============================
 
 ESTADOS_MEXICO = [
@@ -20,20 +20,25 @@ ESTADOS_MEXICO = [
 MODALIDADES = ["presencial", "remoto", "hibrido", "híbrido"]
 
 
-def normalizar(texto):
-    return texto.lower().strip()
+def normalizar(txt):
+    return txt.lower().strip()
+
+
+def get_context_params(contexts, nombre):
+    for c in contexts:
+        if nombre in c["name"]:
+            return c.get("parameters", {})
+    return {}
 
 
 def respuesta(texto, session, contexto, **params):
     return jsonify({
         "fulfillmentText": texto,
-        "outputContexts": [
-            {
-                "name": f"{session}/contexts/{contexto}",
-                "lifespanCount": 5,
-                "parameters": params
-            }
-        ]
+        "outputContexts": [{
+            "name": f"{session}/contexts/{contexto}",
+            "lifespanCount": 5,
+            "parameters": params
+        }]
     })
 
 
@@ -44,26 +49,36 @@ def respuesta(texto, session, contexto, **params):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     req = request.get_json()
+    query = req["queryResult"]
+    session = req["session"]
 
-    query_result = req.get("queryResult", {})
-    session = req.get("session")
-    texto_usuario = normalizar(query_result.get("queryText", ""))
+    texto = normalizar(query.get("queryText", ""))
+    contexts = query.get("outputContexts", [])
 
-    params = query_result.get("parameters", {})
-    contexts = query_result.get("outputContexts", [])
-    context_names = [c["name"] for c in contexts]
+    esperando_vacante = any("esperando_vacante" in c["name"] for c in contexts)
+    esperando_ciudad = any("esperando_ciudad" in c["name"] for c in contexts)
+    esperando_modalidad = any("esperando_modalidad" in c["name"] for c in contexts)
+    esperando_sueldo = any("esperando_sueldo" in c["name"] for c in contexts)
 
-    def tiene_contexto(nombre):
-        return any(nombre in c for c in context_names)
+    params = get_context_params(contexts, "esperando")
 
-    vacante = params.get("vacante_nombre", "")
-    sueldo = params.get("sueldo_minimo", "")
+    vacante = params.get("vacante")
+    ciudad = params.get("ciudad")
+    modalidad = params.get("modalidad")
+    sueldo = params.get("sueldo")
 
     # ===============================
-    # 1️⃣ ESPERANDO VACANTE
+    # 1️⃣ PUESTO
     # ===============================
-    if tiene_contexto("esperando_vacante") or not vacante:
-        vacante = texto_usuario
+    if not vacante:
+        return respuesta(
+            "¿Qué puesto estás buscando? 👀\nEjemplo: chofer, jefe de logística",
+            session,
+            "esperando_vacante"
+        )
+
+    if esperando_vacante:
+        vacante = texto
         return respuesta(
             f"Perfecto 👍 ¿En qué estado de México buscas trabajo como *{vacante}*?",
             session,
@@ -72,26 +87,21 @@ def webhook():
         )
 
     # ===============================
-    # 2️⃣ ESPERANDO CIUDAD
+    # 2️⃣ CIUDAD
     # ===============================
-    if tiene_contexto("esperando_ciudad"):
-        ciudad = texto_usuario
+    if esperando_ciudad:
+        ciudad = texto
 
         if ciudad not in ESTADOS_MEXICO:
             return respuesta(
-                "No reconocí esa ciudad 😅\n"
-                "Escribe un estado de México.\n"
-                "Ejemplo: Puebla, CDMX, Jalisco",
+                "No reconocí esa ciudad 😅\nEjemplo: Puebla, CDMX, Jalisco",
                 session,
                 "esperando_ciudad",
                 vacante=vacante
             )
 
         return respuesta(
-            "Excelente 👍 ¿Qué modalidad prefieres?\n"
-            "🏢 Presencial\n"
-            "🏠 Remoto\n"
-            "🔄 Híbrido",
+            "Excelente 👍 ¿Qué modalidad prefieres?\nPresencial, Remoto o Híbrido",
             session,
             "esperando_modalidad",
             vacante=vacante,
@@ -99,79 +109,63 @@ def webhook():
         )
 
     # ===============================
-    # 3️⃣ ESPERANDO MODALIDAD
+    # 3️⃣ MODALIDAD
     # ===============================
-    if tiene_contexto("esperando_modalidad"):
-        modalidad = texto_usuario
+    if esperando_modalidad:
+        modalidad = texto
 
         if modalidad not in MODALIDADES:
             return respuesta(
-                "No entendí la modalidad 😅\n"
                 "Escribe: Presencial, Remoto o Híbrido",
                 session,
                 "esperando_modalidad",
                 vacante=vacante,
-                ciudad=params.get("ciudad", "")
+                ciudad=ciudad
             )
 
         return respuesta(
-            "Perfecto 💰 ¿Cuál es el sueldo mensual mínimo que buscas?\n"
-            "Ejemplo: 15000",
+            "¿Cuál es el sueldo mensual mínimo que buscas? 💰\nEjemplo: 15000",
             session,
             "esperando_sueldo",
             vacante=vacante,
-            ciudad=params.get("ciudad", ""),
+            ciudad=ciudad,
             modalidad=modalidad
         )
 
     # ===============================
-    # 4️⃣ ESPERANDO SUELDO
+    # 4️⃣ SUELDO
     # ===============================
-    if tiene_contexto("esperando_sueldo"):
+    if esperando_sueldo:
         try:
-            sueldo = int(texto_usuario)
+            sueldo = int(texto)
         except:
             return respuesta(
-                "Escribe solo el número del sueldo 😄\nEjemplo: 15000",
+                "Escribe solo el número del sueldo 😄",
                 session,
                 "esperando_sueldo",
                 vacante=vacante,
-                ciudad=params.get("ciudad", ""),
-                modalidad=params.get("modalidad", "")
+                ciudad=ciudad,
+                modalidad=modalidad
             )
 
-        # ===============================
-        # 5️⃣ BÚSQUEDA FINAL
-        # ===============================
-        search_terms = f"{vacante} {params.get('modalidad', '')}"
         query = urllib.parse.urlencode({
-            "q": search_terms,
-            "l": params.get("ciudad", ""),
+            "q": f"{vacante} {modalidad}",
+            "l": ciudad,
             "fromage": "7",
             "sort": "date"
         })
 
-        indeed_url = f"https://mx.indeed.com/jobs?{query}"
+        url = f"https://mx.indeed.com/jobs?{query}"
 
-        texto_final = (
-            "🔍 **Resultados reales encontrados en Indeed**\n\n"
-            f"📌 Vacante: {vacante}\n"
-            f"📍 Ubicación: {params.get('ciudad')}\n"
-            f"🏢 Modalidad: {params.get('modalidad')}\n"
-            f"💰 Sueldo deseado: ${sueldo}\n\n"
-            f"👉 Ver vacantes recientes:\n{indeed_url}"
-        )
-
-        return jsonify({"fulfillmentText": texto_final})
-
-    # ===============================
-    # FALLBACK GENERAL
-    # ===============================
-    return respuesta(
-        "¿Qué puesto estás buscando? 👀\nEjemplo: chofer, jefe de logística",
-        session,
-        "esperando_vacante"
-    )
+        return jsonify({
+            "fulfillmentText":
+                f"🔍 **Vacantes encontradas**\n\n"
+                f"📌 Puesto: {vacante}\n"
+                f"📍 Ubicación: {ciudad}\n"
+                f"🏢 Modalidad: {modalidad}\n"
+                f"💰 Sueldo mínimo: ${sueldo}\n\n"
+                f"👉 {url}"
+        })
 
 
 if __name__ == "__main__":
