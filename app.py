@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+import re
 import urllib.parse
 
 app = Flask(__name__)
@@ -17,125 +18,104 @@ MODALIDADES = ["presencial", "remoto", "hibrido", "híbrido"]
 def norm(t):
     return t.lower().strip()
 
-def get_ctx(contexts, name):
-    for c in contexts:
-        if name in c["name"]:
-            return c
+def extraer_sueldo(texto):
+    m = re.search(r"\b(\d{4,6})\b", texto)
+    return int(m.group(1)) if m else None
+
+def extraer_estado(texto):
+    for e in ESTADOS:
+        if e in texto:
+            return e
     return None
 
-def responder(texto, session, paso, data):
-    return jsonify({
-        "fulfillmentText": texto,
-        "outputContexts": [{
-            "name": f"{session}/contexts/flujo",
-            "lifespanCount": 10,
-            "parameters": {
-                "paso": paso,
-                **data
-            }
-        }]
-    })
+def extraer_modalidad(texto):
+    for m in MODALIDADES:
+        if m in texto:
+            return m
+    return None
+
+def limpiar_texto(texto):
+    for e in ESTADOS + MODALIDADES:
+        texto = texto.replace(e, "")
+    texto = re.sub(r"\d{4,6}", "", texto)
+    return texto.strip()
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     req = request.get_json()
     session = req["session"]
     texto = norm(req["queryResult"]["queryText"])
-    contexts = req["queryResult"].get("outputContexts", [])
 
-    flujo = get_ctx(contexts, "flujo")
-    paso = flujo["parameters"].get("paso") if flujo else None
+    contexts = req["queryResult"].get("outputContexts", [])
+    flujo = next((c for c in contexts if "flujo" in c["name"]), None)
     data = flujo["parameters"] if flujo else {}
 
-    # 🔹 INICIO INTELIGENTE
-    if not paso:
-        if texto in ESTADOS:
-            data["ciudad"] = texto
-            return responder(
-                "Perfecto 👍 ¿Qué puesto estás buscando?",
-                session,
-                "vacante",
-                data
-            )
-        else:
-            data["vacante"] = texto
-            return responder(
-                "¿En qué estado de México buscas trabajo?",
-                session,
-                "ciudad",
-                data
-            )
+    # 🔹 EXTRACCIÓN INTELIGENTE
+    estado = extraer_estado(texto)
+    modalidad = extraer_modalidad(texto)
+    sueldo = extraer_sueldo(texto)
 
-    # 🔹 CIUDAD
-    if paso == "ciudad":
-        if texto not in ESTADOS:
-            return responder(
-                "No reconocí ese estado 😅\nEjemplo: Puebla, CDMX, Jalisco",
-                session,
-                "ciudad",
-                data
-            )
-        data["ciudad"] = texto
-        return responder(
-            "¿Qué modalidad prefieres?\nPresencial, Remoto o Híbrido",
-            session,
-            "modalidad",
-            data
-        )
+    if estado:
+        data["ciudad"] = estado
+    if modalidad:
+        data["modalidad"] = modalidad
+    if sueldo:
+        data["sueldo"] = sueldo
 
-    # 🔹 VACANTE
-    if paso == "vacante":
-        data["vacante"] = texto
-        return responder(
-            "¿Qué modalidad prefieres?\nPresencial, Remoto o Híbrido",
-            session,
-            "modalidad",
-            data
-        )
+    posible_vacante = limpiar_texto(texto)
+    if posible_vacante and not data.get("vacante"):
+        data["vacante"] = posible_vacante
 
-    # 🔹 MODALIDAD
-    if paso == "modalidad":
-        if texto not in MODALIDADES:
-            return responder(
-                "Escribe: Presencial, Remoto o Híbrido",
-                session,
-                "modalidad",
-                data
-            )
-        data["modalidad"] = texto
-        return responder(
-            "¿Cuál es el sueldo mínimo mensual que buscas? 💰\nEjemplo: 15000",
-            session,
-            "sueldo",
-            data
-        )
-
-    # 🔹 SUELDO
-    if paso == "sueldo":
-        try:
-            sueldo = int(texto)
-        except:
-            return responder(
-                "Escribe solo el número del sueldo 🙂",
-                session,
-                "sueldo",
-                data
-            )
-
-        query = urllib.parse.urlencode({
-            "q": f"{data['vacante']} {data['modalidad']}",
-            "l": data["ciudad"]
-        })
+    # 🔹 VALIDACIÓN MÍNIMA
+    if not data.get("vacante") or not data.get("ciudad"):
+        faltantes = []
+        if not data.get("vacante"):
+            faltantes.append("puesto")
+        if not data.get("ciudad"):
+            faltantes.append("estado")
 
         return jsonify({
             "fulfillmentText":
-                f"🔍 Vacantes encontradas:\n\n"
-                f"📌 {data['vacante']}\n"
-                f"📍 {data['ciudad']}\n"
-                f"🏢 {data['modalidad']}\n"
-                f"💰 Desde ${sueldo}\n\n"
-                f"https://mx.indeed.com/jobs?{query}"
+                f"Para buscar empleo necesito al menos:\n"
+                f"👉 {', '.join(faltantes)}\n\n"
+                f"Ejemplo:\n"
+                f"Director comercial en Puebla",
+            "outputContexts": [{
+                "name": f"{session}/contexts/flujo",
+                "lifespanCount": 10,
+                "parameters": data
+            }]
         })
+
+    # 🔹 BÚSQUEDA
+    query = f"{data['vacante']} {data.get('modalidad','')}".strip()
+    url = urllib.parse.urlencode({
+        "q": query,
+        "l": data["ciudad"]
+    })
+
+    respuesta = (
+        f"🔍 Vacantes encontradas:\n\n"
+        f"📌 Puesto: {data['vacante']}\n"
+        f"📍 Estado: {data['ciudad']}\n"
+    )
+
+    if data.get("modalidad"):
+        respuesta += f"🏢 Modalidad: {data['modalidad']}\n"
+    if data.get("sueldo"):
+        respuesta += f"💰 Sueldo desde: ${data['sueldo']}\n"
+
+    respuesta += f"\nhttps://mx.indeed.com/jobs?{url}\n\n"
+    respuesta += "¿Deseas refinar la búsqueda? (sueldo, modalidad, jornada)"
+
+    return jsonify({
+        "fulfillmentText": respuesta,
+        "outputContexts": [{
+            "name": f"{session}/contexts/flujo",
+            "lifespanCount": 10,
+            "parameters": data
+        }]
+    })
 
 if __name__ == "__main__":
     app.run(port=5000)
