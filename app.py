@@ -1,121 +1,151 @@
 from flask import Flask, request, jsonify
 import re
+import unicodedata
 import urllib.parse
 
 app = Flask(__name__)
 
-ESTADOS = [
-    "aguascalientes","baja california","baja california sur","campeche","chiapas",
-    "chihuahua","cdmx","ciudad de mexico","coahuila","colima","durango",
-    "estado de mexico","edomex","guanajuato","guerrero","hidalgo","jalisco",
-    "michoacan","morelos","nayarit","nuevo leon","oaxaca","puebla","queretaro",
-    "quintana roo","san luis potosi","sinaloa","sonora","tabasco","tamaulipas",
-    "tlaxcala","veracruz","yucatan","zacatecas"
-]
+# =========================
+# NORMALIZACIÓN
+# =========================
+def normalize(text):
+    text = text.lower()
+    text = ''.join(
+        c for c in unicodedata.normalize('NFD', text)
+        if unicodedata.category(c) != 'Mn'
+    )
+    return text.strip()
 
-MODALIDADES = ["presencial", "remoto", "hibrido", "híbrido"]
+# =========================
+# ESTADOS DE MÉXICO
+# =========================
+ESTADOS = {
+    "aguascalientes","baja california","baja california sur","campeche","coahuila",
+    "colima","chiapas","chihuahua","ciudad de mexico","cdmx","durango","guanajuato",
+    "guerrero","hidalgo","jalisco","estado de mexico","mexico","michoacan","morelos",
+    "nayarit","nuevo leon","oaxaca","puebla","queretaro","quintana roo","san luis potosi",
+    "sinaloa","sonora","tabasco","tamaulipas","tlaxcala","veracruz","yucatan","zacatecas"
+}
 
-def norm(t):
-    return t.lower().strip()
+def detect_estado(text):
+    for estado in ESTADOS:
+        if estado in text:
+            if estado == "cdmx":
+                return "Ciudad de México"
+            if estado == "mexico":
+                return "Estado de México"
+            return estado.title()
+    return ""
 
-def extraer_sueldo(texto):
-    m = re.search(r"\b(\d{4,6})\b", texto)
-    return int(m.group(1)) if m else None
+# =========================
+# MODALIDAD
+# =========================
+def detect_modalidad(text):
+    if "remoto" in text or "home office" in text:
+        return "remoto"
+    if "hibrido" in text:
+        return "hibrido"
+    if "presencial" in text:
+        return "presencial"
+    return ""
 
-def extraer_estado(texto):
-    for e in ESTADOS:
-        if e in texto:
-            return e
-    return None
+# =========================
+# SUELDO
+# =========================
+def detect_sueldo(text):
+    text = text.replace(",", "")
+    match = re.search(r'(\$?\d{4,6})', text)
+    if match:
+        return match.group(1).replace("$", "")
+    match = re.search(r'(\d+)\s?k', text)
+    if match:
+        return str(int(match.group(1)) * 1000)
+    match = re.search(r'(\d+)\s*mil', text)
+    if match:
+        return str(int(match.group(1)) * 1000)
+    return ""
 
-def extraer_modalidad(texto):
-    for m in MODALIDADES:
-        if m in texto:
-            return m
-    return None
+# =========================
+# LIMPIAR VACANTE
+# =========================
+def clean_vacante(text, estado, modalidad, sueldo):
+    for word in [estado.lower(), modalidad, sueldo]:
+        if word:
+            text = text.replace(word, "")
+    text = re.sub(r'\b(busco|empleo|trabajo|puesto|vacante|de|en|con|para)\b', '', text)
+    return text.strip()
 
-def limpiar_texto(texto):
-    for e in ESTADOS + MODALIDADES:
-        texto = texto.replace(e, "")
-    texto = re.sub(r"\d{4,6}", "", texto)
-    return texto.strip()
-
+# =========================
+# WEBHOOK
+# =========================
 @app.route("/webhook", methods=["POST"])
 def webhook():
     req = request.get_json()
-    session = req["session"]
-    texto = norm(req["queryResult"]["queryText"])
+    query = req.get("queryResult", {}).get("queryText", "")
+    session = req.get("session")
 
-    contexts = req["queryResult"].get("outputContexts", [])
-    flujo = next((c for c in contexts if "flujo" in c["name"]), None)
-    data = flujo["parameters"] if flujo else {}
+    text = normalize(query)
 
-    # 🔹 EXTRACCIÓN INTELIGENTE
-    estado = extraer_estado(texto)
-    modalidad = extraer_modalidad(texto)
-    sueldo = extraer_sueldo(texto)
+    estado = detect_estado(text)
+    modalidad = detect_modalidad(text)
+    sueldo = detect_sueldo(text)
+    vacante = clean_vacante(text, estado, modalidad, sueldo)
 
-    if estado:
-        data["ciudad"] = estado
-    if modalidad:
-        data["modalidad"] = modalidad
-    if sueldo:
-        data["sueldo"] = sueldo
+    # =========================
+    # VALIDACIONES
+    # =========================
+    if not vacante and not estado:
+        return respond(
+            "¿Qué empleo buscas o en qué estado deseas trabajar?\nEjemplo:\n• Puebla\n• Chofer en Jalisco",
+            session
+        )
 
-    posible_vacante = limpiar_texto(texto)
-    if posible_vacante and not data.get("vacante"):
-        data["vacante"] = posible_vacante
+    if vacante and not estado:
+        return respond(
+            f"Perfecto 👍 ¿En qué estado de México buscas trabajo como *{vacante}*?",
+            session
+        )
 
-    # 🔹 VALIDACIÓN MÍNIMA
-    if not data.get("vacante") or not data.get("ciudad"):
-        faltantes = []
-        if not data.get("vacante"):
-            faltantes.append("puesto")
-        if not data.get("ciudad"):
-            faltantes.append("estado")
+    # =========================
+    # BÚSQUEDA
+    # =========================
+    search_terms = vacante if vacante else ""
+    query_params = {
+        "q": search_terms,
+        "l": estado,
+        "fromage": "7",
+        "sort": "date"
+    }
 
-        return jsonify({
-            "fulfillmentText":
-                f"Para buscar empleo necesito al menos:\n"
-                f"👉 {', '.join(faltantes)}\n\n"
-                f"Ejemplo:\n"
-                f"Director comercial en Puebla",
-            "outputContexts": [{
-                "name": f"{session}/contexts/flujo",
-                "lifespanCount": 10,
-                "parameters": data
-            }]
-        })
+    indeed_url = f"https://mx.indeed.com/jobs?{urllib.parse.urlencode(query_params)}"
 
-    # 🔹 BÚSQUEDA
-    query = f"{data['vacante']} {data.get('modalidad','')}".strip()
-    url = urllib.parse.urlencode({
-        "q": query,
-        "l": data["ciudad"]
-    })
-
-    respuesta = (
-        f"🔍 Vacantes encontradas:\n\n"
-        f"📌 Puesto: {data['vacante']}\n"
-        f"📍 Estado: {data['ciudad']}\n"
+    response = (
+        "🔍 **Resultados reales encontrados en Indeed**\n\n"
+        f"📌 Vacante: {vacante if vacante else 'Todas'}\n"
+        f"📍 Ubicación: {estado}\n"
     )
 
-    if data.get("modalidad"):
-        respuesta += f"🏢 Modalidad: {data['modalidad']}\n"
-    if data.get("sueldo"):
-        respuesta += f"💰 Sueldo desde: ${data['sueldo']}\n"
+    if modalidad:
+        response += f"🏢 Modalidad: {modalidad}\n"
+    if sueldo:
+        response += f"💰 Sueldo deseado: ${sueldo}\n"
 
-    respuesta += f"\nhttps://mx.indeed.com/jobs?{url}\n\n"
-    respuesta += "¿Deseas refinar la búsqueda? (sueldo, modalidad, jornada)"
+    response += f"\n👉 Ver vacantes recientes:\n{indeed_url}"
 
+    return jsonify({"fulfillmentText": response})
+
+
+def respond(text, session):
     return jsonify({
-        "fulfillmentText": respuesta,
-        "outputContexts": [{
-            "name": f"{session}/contexts/flujo",
-            "lifespanCount": 10,
-            "parameters": data
-        }]
+        "fulfillmentText": text,
+        "outputContexts": [
+            {
+                "name": f"{session}/contexts/flujo",
+                "lifespanCount": 5
+            }
+        ]
     })
 
+
 if __name__ == "__main__":
-    app.run(port=5000)
+    app.run()
