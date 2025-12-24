@@ -14,28 +14,27 @@ ESTADOS = [
 
 MODALIDADES = ["presencial", "remoto", "hibrido", "híbrido"]
 
+def norm(t):
+    return t.lower().strip()
 
-def norm(txt):
-    return txt.lower().strip()
-
-
-def ctx(contexts, name):
+def get_ctx(contexts, name):
     for c in contexts:
         if name in c["name"]:
             return c
     return None
 
-
-def responder(texto, session, contexto, data):
+def respuesta(texto, session, paso, data):
     return jsonify({
         "fulfillmentText": texto,
         "outputContexts": [{
-            "name": f"{session}/contexts/{contexto}",
-            "lifespanCount": 5,
-            "parameters": data
+            "name": f"{session}/contexts/flujo",
+            "lifespanCount": 10,
+            "parameters": {
+                "paso": paso,
+                **data
+            }
         }]
     })
-
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -44,97 +43,90 @@ def webhook():
     texto = norm(req["queryResult"]["queryText"])
     contexts = req["queryResult"].get("outputContexts", [])
 
-    c_vac = ctx(contexts, "vacante")
-    c_ciu = ctx(contexts, "ciudad")
-    c_mod = ctx(contexts, "modalidad")
-    c_sue = ctx(contexts, "sueldo")
+    flujo = get_ctx(contexts, "flujo")
+    paso = flujo["parameters"].get("paso") if flujo else None
+    data = flujo["parameters"] if flujo else {}
 
-    # 1️⃣ PUESTO
-    if not c_vac:
-        return responder(
-            "¿Qué puesto estás buscando? 👀\nEjemplo: chofer, jefe de logística",
+    # 1️⃣ INICIO
+    if not paso:
+        return respuesta(
+            "¿Qué puesto estás buscando? 👀\nEjemplo: jefe de logística",
             session,
             "vacante",
             {}
         )
 
-    if c_vac and not c_ciu:
-        return responder(
-            f"Perfecto 👍 ¿En qué estado de México buscas trabajo como *{texto}*?",
+    # 2️⃣ VACANTE
+    if paso == "vacante":
+        data["vacante"] = texto
+        return respuesta(
+            f"Perfecto 👍 ¿En qué estado de México buscas trabajo?",
             session,
             "ciudad",
-            {"vacante": texto}
+            data
         )
 
-    # 2️⃣ CIUDAD
-    if c_ciu and not c_mod:
+    # 3️⃣ CIUDAD
+    if paso == "ciudad":
         if texto not in ESTADOS:
-            return responder(
-                "No reconocí esa ciudad 😅\nEjemplo: Puebla, CDMX, Jalisco",
+            return respuesta(
+                "No reconocí ese estado 😅\nEjemplo: Puebla, CDMX, Jalisco",
                 session,
                 "ciudad",
-                c_ciu["parameters"]
+                data
             )
-
-        data = c_ciu["parameters"]
         data["ciudad"] = texto
-        return responder(
+        return respuesta(
             "¿Qué modalidad prefieres?\nPresencial, Remoto o Híbrido",
             session,
             "modalidad",
             data
         )
 
-    # 3️⃣ MODALIDAD
-    if c_mod and not c_sue:
+    # 4️⃣ MODALIDAD
+    if paso == "modalidad":
         if texto not in MODALIDADES:
-            return responder(
+            return respuesta(
                 "Escribe: Presencial, Remoto o Híbrido",
                 session,
                 "modalidad",
-                c_mod["parameters"]
+                data
             )
-
-        data = c_mod["parameters"]
         data["modalidad"] = texto
-        return responder(
+        return respuesta(
             "¿Cuál es el sueldo mensual mínimo que buscas? 💰\nEjemplo: 15000",
             session,
             "sueldo",
             data
         )
 
-    # 4️⃣ SUELDO
-    if c_sue:
+    # 5️⃣ SUELDO
+    if paso == "sueldo":
         try:
             sueldo = int(texto)
         except:
-            return responder(
+            return respuesta(
                 "Escribe solo el número del sueldo 🙂",
                 session,
                 "sueldo",
-                c_sue["parameters"]
+                data
             )
 
-        d = c_sue["parameters"]
-
         query = urllib.parse.urlencode({
-            "q": f"{d['vacante']} {d['modalidad']}",
-            "l": d["ciudad"],
-            "fromage": "7",
+            "q": f"{data['vacante']} {data['modalidad']}",
+            "l": data["ciudad"],
             "sort": "date"
         })
 
         return jsonify({
             "fulfillmentText":
-                f"🔍 **Vacantes encontradas**\n\n"
-                f"📌 Puesto: {d['vacante']}\n"
-                f"📍 Ubicación: {d['ciudad']}\n"
-                f"🏢 Modalidad: {d['modalidad']}\n"
-                f"💰 Sueldo mínimo: ${sueldo}\n\n"
+                f"🔍 Vacantes encontradas:\n\n"
+                f"📌 {data['vacante']}\n"
+                f"📍 {data['ciudad']}\n"
+                f"🏢 {data['modalidad']}\n"
+                f"💰 Desde ${sueldo}\n\n"
                 f"https://mx.indeed.com/jobs?{query}"
         })
 
-
 if __name__ == "__main__":
-    app.run()
+    app.run(port=5000)
