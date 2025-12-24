@@ -23,7 +23,7 @@ def get_ctx(contexts, name):
             return c
     return None
 
-def respuesta(texto, session, paso, data):
+def responder(texto, session, paso, data):
     return jsonify({
         "fulfillmentText": texto,
         "outputContexts": [{
@@ -47,65 +47,75 @@ def webhook():
     paso = flujo["parameters"].get("paso") if flujo else None
     data = flujo["parameters"] if flujo else {}
 
-    # 1️⃣ INICIO
+    # 🔹 INICIO INTELIGENTE
     if not paso:
-        return respuesta(
-            "¿Qué puesto estás buscando? 👀\nEjemplo: jefe de logística",
-            session,
-            "vacante",
-            {}
-        )
+        if texto in ESTADOS:
+            data["ciudad"] = texto
+            return responder(
+                "Perfecto 👍 ¿Qué puesto estás buscando?",
+                session,
+                "vacante",
+                data
+            )
+        else:
+            data["vacante"] = texto
+            return responder(
+                "¿En qué estado de México buscas trabajo?",
+                session,
+                "ciudad",
+                data
+            )
 
-    # 2️⃣ VACANTE
-    if paso == "vacante":
-        data["vacante"] = texto
-        return respuesta(
-            f"Perfecto 👍 ¿En qué estado de México buscas trabajo?",
-            session,
-            "ciudad",
-            data
-        )
-
-    # 3️⃣ CIUDAD
+    # 🔹 CIUDAD
     if paso == "ciudad":
         if texto not in ESTADOS:
-            return respuesta(
+            return responder(
                 "No reconocí ese estado 😅\nEjemplo: Puebla, CDMX, Jalisco",
                 session,
                 "ciudad",
                 data
             )
         data["ciudad"] = texto
-        return respuesta(
+        return responder(
             "¿Qué modalidad prefieres?\nPresencial, Remoto o Híbrido",
             session,
             "modalidad",
             data
         )
 
-    # 4️⃣ MODALIDAD
+    # 🔹 VACANTE
+    if paso == "vacante":
+        data["vacante"] = texto
+        return responder(
+            "¿Qué modalidad prefieres?\nPresencial, Remoto o Híbrido",
+            session,
+            "modalidad",
+            data
+        )
+
+    # 🔹 MODALIDAD
     if paso == "modalidad":
         if texto not in MODALIDADES:
-            return respuesta(
+            return responder(
                 "Escribe: Presencial, Remoto o Híbrido",
                 session,
                 "modalidad",
                 data
             )
         data["modalidad"] = texto
-        return respuesta(
-            "¿Cuál es el sueldo mensual mínimo que buscas? 💰\nEjemplo: 15000",
+        return responder(
+            "¿Cuál es el sueldo mínimo mensual que buscas? 💰\nEjemplo: 15000",
             session,
             "sueldo",
             data
         )
 
-    # 5️⃣ SUELDO
+    # 🔹 SUELDO
     if paso == "sueldo":
         try:
             sueldo = int(texto)
         except:
-            return respuesta(
+            return responder(
                 "Escribe solo el número del sueldo 🙂",
                 session,
                 "sueldo",
@@ -114,8 +124,7 @@ def webhook():
 
         query = urllib.parse.urlencode({
             "q": f"{data['vacante']} {data['modalidad']}",
-            "l": data["ciudad"],
-            "sort": "date"
+            "l": data["ciudad"]
         })
 
         return jsonify({
