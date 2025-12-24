@@ -9,9 +9,11 @@ def webhook():
 
     query_result = req.get("queryResult", {})
     params = query_result.get("parameters", {})
+    contexts = query_result.get("outputContexts", [])
     session = req.get("session")
+    user_text = query_result.get("queryText", "").strip()
 
-    # Extraer parámetros (soporta lista o string)
+    # Helper para parámetros
     def get_value(param):
         if isinstance(param, list):
             return param[0] if param else ""
@@ -22,7 +24,11 @@ def webhook():
     modalidad = get_value(params.get("tipo_modalidad"))
     sueldo = get_value(params.get("sueldo_minimo"))
 
-    # 1️⃣ Falta puesto
+    # Detectar contexto activo
+    def has_context(name):
+        return any(name in c.get("name", "") for c in contexts)
+
+    # 1️⃣ Puesto
     if not vacante:
         return respuesta(
             "¿Qué puesto estás buscando? 👀\nEjemplo: chofer, jefe de logística, administrativo",
@@ -30,16 +36,19 @@ def webhook():
             "esperando_vacante"
         )
 
-    # 2️⃣ Falta ciudad
+    # 2️⃣ Ciudad (usar texto libre si viene de fallback)
     if not ciudad:
-        return respuesta(
-            f"Perfecto 👍 ¿En qué ciudad buscas trabajo como *{vacante}*?",
-            session,
-            "esperando_ciudad",
-            vacante=vacante
-        )
+        if has_context("esperando_ciudad") and user_text:
+            ciudad = user_text.lower()
+        else:
+            return respuesta(
+                f"Perfecto 👍 ¿En qué ciudad buscas trabajo como *{vacante}*?",
+                session,
+                "esperando_ciudad",
+                vacante=vacante
+            )
 
-    # 3️⃣ Falta modalidad
+    # 3️⃣ Modalidad
     if not modalidad:
         return respuesta(
             "¿Qué modalidad prefieres?\n🏢 Presencial\n🏠 Remoto\n🔄 Híbrido",
@@ -49,7 +58,7 @@ def webhook():
             ciudad=ciudad
         )
 
-    # 4️⃣ Falta sueldo
+    # 4️⃣ Sueldo
     if not sueldo:
         return respuesta(
             "¿Cuál es el sueldo mensual mínimo que buscas? 💰\nEjemplo: 15000",
@@ -60,7 +69,7 @@ def webhook():
             modalidad=modalidad
         )
 
-    # 5️⃣ Ya tenemos todo → búsqueda real
+    # 5️⃣ Búsqueda en Indeed
     search_terms = f"{vacante} {modalidad}"
     query = urllib.parse.urlencode({
         "q": search_terms,
