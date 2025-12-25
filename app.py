@@ -6,7 +6,7 @@ import urllib.parse
 app = Flask(__name__)
 
 # =========================
-# NORMALIZACIÓN
+# NORMALIZAR TEXTO
 # =========================
 def normalize(text):
     text = text.lower()
@@ -17,7 +17,7 @@ def normalize(text):
     return text.strip()
 
 # =========================
-# ESTADOS DE MÉXICO
+# ESTADOS MÉXICO
 # =========================
 ESTADOS = {
     "aguascalientes","baja california","baja california sur","campeche","coahuila",
@@ -28,13 +28,13 @@ ESTADOS = {
 }
 
 def detect_estado(text):
-    for estado in ESTADOS:
-        if estado in text:
-            if estado == "cdmx":
+    for e in ESTADOS:
+        if e in text:
+            if e == "cdmx":
                 return "Ciudad de México"
-            if estado == "mexico":
+            if e == "mexico":
                 return "Estado de México"
-            return estado.title()
+            return e.title()
     return ""
 
 # =========================
@@ -54,19 +54,16 @@ def detect_modalidad(text):
 # =========================
 def detect_sueldo(text):
     text = text.replace(",", "")
-    match = re.search(r'\$?\b(\d{4,6})\b', text)
+    match = re.search(r'\b(\d{4,6})\b', text)
     if match:
         return match.group(1)
-    match = re.search(r'\b(\d+)\s?k\b', text)
-    if match:
-        return str(int(match.group(1)) * 1000)
-    match = re.search(r'\b(\d+)\s*mil\b', text)
+    match = re.search(r'\b(\d+)\s*(mil|k)\b', text)
     if match:
         return str(int(match.group(1)) * 1000)
     return ""
 
 # =========================
-# LIMPIAR TEXTO PARA VACANTE
+# EXTRAER VACANTE (ROBUSTO)
 # =========================
 def extract_vacante(text, estado, modalidad, sueldo):
     clean = text
@@ -78,11 +75,21 @@ def extract_vacante(text, estado, modalidad, sueldo):
     if sueldo:
         clean = clean.replace(sueldo, "")
 
-    # eliminar frases de sueldo comunes
-    clean = re.sub(r'\bal mes\b|\bmensual(es)?\b|\bmxn\b|\bpesos\b', '', clean)
+    # eliminar frases comunes, NO estructurales
+    clean = re.sub(
+        r'\b(busco|empleo|trabajo|vacante|puesto|quiero)\b',
+        '',
+        clean
+    )
 
-    # eliminar frases genéricas
-    clean = re.sub(r'\b(busco|empleo|trabajo|vacante|puesto)\b', '', clean)
+    # eliminar frases de sueldo
+    clean = re.sub(
+        r'\bal mes\b|\bmensual(es)?\b|\bpesos\b|\bmxn\b',
+        '',
+        clean
+    )
+
+    clean = re.sub(r'\s{2,}', ' ', clean)
 
     return clean.strip()
 
@@ -92,10 +99,10 @@ def extract_vacante(text, estado, modalidad, sueldo):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     req = request.get_json()
-    query = req.get("queryResult", {}).get("queryText", "")
+    text_raw = req.get("queryResult", {}).get("queryText", "")
     session = req.get("session")
 
-    text = normalize(query)
+    text = normalize(text_raw)
 
     estado = detect_estado(text)
     modalidad = detect_modalidad(text)
@@ -103,32 +110,35 @@ def webhook():
     vacante = extract_vacante(text, estado, modalidad, sueldo)
 
     # =========================
-    # FLUJO CONVERSACIONAL
+    # FLUJO HUMANO
     # =========================
     if not vacante and not estado:
-        return respond(
-            "¿Qué empleo buscas o en qué estado deseas trabajar?\nEjemplos:\n• Puebla\n• Chofer en Jalisco\n• Gestor de cobranza en Oaxaca",
+        return simple_response(
+            "¿Qué empleo buscas o en qué estado deseas trabajar?\n"
+            "Ejemplos:\n"
+            "• Puebla\n"
+            "• Chofer en Jalisco\n"
+            "• Gestor de cobranza en Oaxaca",
             session
         )
 
     if vacante and not estado:
-        return respond(
-            f"Perfecto 👍 ¿En qué estado de México buscas trabajo como *{vacante}*?",
+        return simple_response(
+            f"Perfecto 👍 ¿En qué estado buscas trabajo como *{vacante}*?",
             session
         )
 
     # =========================
-    # BÚSQUEDA INDEED
+    # INDEED
     # =========================
-    search_terms = vacante if vacante else ""
-    query_params = {
-        "q": search_terms,
+    params = {
+        "q": vacante,
         "l": estado,
         "fromage": "7",
         "sort": "date"
     }
 
-    indeed_url = f"https://mx.indeed.com/jobs?{urllib.parse.urlencode(query_params)}"
+    indeed_url = f"https://mx.indeed.com/jobs?{urllib.parse.urlencode(params)}"
 
     response = (
         "🔍 **Resultados reales encontrados en Indeed**\n\n"
@@ -145,8 +155,7 @@ def webhook():
 
     return jsonify({"fulfillmentText": response})
 
-
-def respond(text, session):
+def simple_response(text, session):
     return jsonify({
         "fulfillmentText": text,
         "outputContexts": [
@@ -156,7 +165,6 @@ def respond(text, session):
             }
         ]
     })
-
 
 if __name__ == "__main__":
     app.run()
