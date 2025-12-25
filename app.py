@@ -54,26 +54,37 @@ def detect_modalidad(text):
 # =========================
 def detect_sueldo(text):
     text = text.replace(",", "")
-    match = re.search(r'(\$?\d{4,6})', text)
+    match = re.search(r'\$?\b(\d{4,6})\b', text)
     if match:
-        return match.group(1).replace("$", "")
-    match = re.search(r'(\d+)\s?k', text)
+        return match.group(1)
+    match = re.search(r'\b(\d+)\s?k\b', text)
     if match:
         return str(int(match.group(1)) * 1000)
-    match = re.search(r'(\d+)\s*mil', text)
+    match = re.search(r'\b(\d+)\s*mil\b', text)
     if match:
         return str(int(match.group(1)) * 1000)
     return ""
 
 # =========================
-# LIMPIAR VACANTE
+# LIMPIAR TEXTO PARA VACANTE
 # =========================
-def clean_vacante(text, estado, modalidad, sueldo):
-    for word in [estado.lower(), modalidad, sueldo]:
-        if word:
-            text = text.replace(word, "")
-    text = re.sub(r'\b(busco|empleo|trabajo|puesto|vacante|de|en|con|para)\b', '', text)
-    return text.strip()
+def extract_vacante(text, estado, modalidad, sueldo):
+    clean = text
+
+    if estado:
+        clean = clean.replace(normalize(estado), "")
+    if modalidad:
+        clean = clean.replace(modalidad, "")
+    if sueldo:
+        clean = clean.replace(sueldo, "")
+
+    # eliminar frases de sueldo comunes
+    clean = re.sub(r'\bal mes\b|\bmensual(es)?\b|\bmxn\b|\bpesos\b', '', clean)
+
+    # eliminar frases genéricas
+    clean = re.sub(r'\b(busco|empleo|trabajo|vacante|puesto)\b', '', clean)
+
+    return clean.strip()
 
 # =========================
 # WEBHOOK
@@ -89,14 +100,14 @@ def webhook():
     estado = detect_estado(text)
     modalidad = detect_modalidad(text)
     sueldo = detect_sueldo(text)
-    vacante = clean_vacante(text, estado, modalidad, sueldo)
+    vacante = extract_vacante(text, estado, modalidad, sueldo)
 
     # =========================
-    # VALIDACIONES
+    # FLUJO CONVERSACIONAL
     # =========================
     if not vacante and not estado:
         return respond(
-            "¿Qué empleo buscas o en qué estado deseas trabajar?\nEjemplo:\n• Puebla\n• Chofer en Jalisco",
+            "¿Qué empleo buscas o en qué estado deseas trabajar?\nEjemplos:\n• Puebla\n• Chofer en Jalisco\n• Gestor de cobranza en Oaxaca",
             session
         )
 
@@ -107,7 +118,7 @@ def webhook():
         )
 
     # =========================
-    # BÚSQUEDA
+    # BÚSQUEDA INDEED
     # =========================
     search_terms = vacante if vacante else ""
     query_params = {
