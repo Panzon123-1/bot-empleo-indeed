@@ -4,6 +4,95 @@ import urllib.parse
 
 app = Flask(__name__)
 
+
+def normalize(text):
+    text = text.lower()
+    text = ''.join(
+        c for c in unicodedata.normalize('NFD', text)
+        if unicodedata.category(c) != 'Mn'
+    )
+    return text.strip()
+
+# =========================
+# ESTADOS MÉXICO
+# =========================
+ESTADOS = {
+    "aguascalientes","baja california","baja california sur","campeche","coahuila",
+    "colima","chiapas","chihuahua","ciudad de mexico","cdmx","durango","guanajuato",
+    "guerrero","hidalgo","jalisco","estado de mexico","mexico","michoacan","morelos",
+    "nayarit","nuevo leon","oaxaca","puebla","queretaro","quintana roo","san luis potosi",
+    "sinaloa","sonora","tabasco","tamaulipas","tlaxcala","veracruz","yucatan","zacatecas"
+}
+
+def detect_estado(text):
+    for e in ESTADOS:
+        if e in text:
+            if e == "cdmx":
+                return "Ciudad de México"
+            if e == "mexico":
+                return "Estado de México"
+            return e.title()
+    return ""
+
+# =========================
+# MODALIDAD
+# =========================
+def detect_modalidad(text):
+    if "remoto" in text or "home office" in text:
+        return "remoto"
+    if "hibrido" in text:
+        return "hibrido"
+    if "presencial" in text:
+        return "presencial"
+    return ""
+
+# =========================
+# SUELDO
+# =========================
+def detect_sueldo(text):
+    text = text.replace(",", "")
+    match = re.search(r'\b(\d{4,6})\b', text)
+    if match:
+        return match.group(1)
+    match = re.search(r'\b(\d+)\s*(mil|k)\b', text)
+    if match:
+        return str(int(match.group(1)) * 1000)
+    return ""
+
+# =========================
+# EXTRAER VACANTE (ROBUSTO)
+# =========================
+def extract_vacante(text, estado, modalidad, sueldo):
+    clean = text
+
+    if estado:
+        clean = clean.replace(normalize(estado), "")
+    if modalidad:
+        clean = clean.replace(modalidad, "")
+    if sueldo:
+        clean = clean.replace(sueldo, "")
+
+    # eliminar frases comunes, NO estructurales
+    clean = re.sub(
+        r'\b(busco|empleo|trabajo|vacante|puesto|quiero|en)\b',
+        '',
+        clean
+    )
+
+    # eliminar frases de sueldo
+    clean = re.sub(
+        r'\bal mes\b|\bmensual(es)?\b|\bpesos\b|\bmxn\b',
+        '',
+        clean
+    )
+
+    clean = re.sub(r'\s{2,}', ' ', clean)
+
+    return clean.strip()
+
+# =========================
+
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     req = request.get_json()
